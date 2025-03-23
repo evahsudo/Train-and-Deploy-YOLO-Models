@@ -79,8 +79,12 @@ else:
 fps_buffer = []
 fps_avg_len = 30
 
-# Color for bounding boxes
+# Colors for bounding boxes
 bbox_colors = [(255, 0, 0), (0, 255, 0), (0, 0, 255)]
+
+# Smoothing factor for box fluctuation
+smooth_factor = 0.7
+prev_boxes = {}
 
 # Inference loop
 img_count = 0
@@ -122,18 +126,31 @@ while True:
         cls = int(det.cls[0].item())
 
         if conf > min_thresh:
+            # Clamp coordinates to avoid overflow
+            xyxy = np.clip(xyxy, 0, [frame.shape[1], frame.shape[0], frame.shape[1], frame.shape[0]])
+
+            # Smooth box fluctuation using moving average
+            if cls in prev_boxes:
+                prev_boxes[cls] = prev_boxes[cls] * (1 - smooth_factor) + xyxy * smooth_factor
+            else:
+                prev_boxes[cls] = xyxy
+            xyxy = prev_boxes[cls].astype(int)
+
             color = bbox_colors[cls % len(bbox_colors)]
             cv2.rectangle(frame, (xyxy[0], xyxy[1]), (xyxy[2], xyxy[3]), color, 2)
+
+            # Draw label and prevent label from going off screen
             label = f"{model.names[cls]}: {conf:.2f}"
-            cv2.putText(frame, label, (xyxy[0], xyxy[1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+            label_y_pos = max(xyxy[1] - 10, 10)
+            cv2.putText(frame, label, (xyxy[0], label_y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
 
     # Display FPS
     end_time = time.perf_counter()
-    fps = 1 / (end_time - start_time)
+    fps = 1 / (end_time - start_time) if (end_time - start_time) > 0 else 0
     fps_buffer.append(fps)
     if len(fps_buffer) > fps_avg_len:
         fps_buffer.pop(0)
-    avg_fps = sum(fps_buffer) / len(fps_buffer)
+    avg_fps = sum(fps_buffer) / len(fps_buffer) if fps_buffer else 0
     cv2.putText(frame, f'FPS: {avg_fps:.2f}', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
     # Display results
