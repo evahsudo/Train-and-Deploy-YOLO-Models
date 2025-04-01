@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 from ultralytics import YOLO
-from collections import defaultdict, deque
+from collections import defaultdict
 
 # Store smoothing state for each object
 class BoxSmoother:
@@ -33,8 +33,8 @@ class BoxSmoother:
         self.frames_since_seen += 1
         return self.frames_since_seen
 
-# Initialize YOLO model
-model = YOLO('runs/detect/train/weights/best.pt')
+# Initialize YOLO model (No path needed here, assuming model is already loaded correctly)
+model = YOLO("best.pt")  # Replace with your YOLOv12 model if it's already loaded
 
 # Trackers for each class
 trackers = defaultdict(BoxSmoother)
@@ -51,16 +51,16 @@ while True:
     if not ret:
         break
     
-    # Run YOLO inference
-    results = model(frame, verbose=False)
+    # Run YOLO inference (Updated for YOLOv12)
+    results = model(frame)  # Direct inference using the model
 
     # Track seen objects
     seen_classes = set()
 
-    for det in results[0].boxes:
-        xyxy = det.xyxy[0].cpu().numpy().astype(int)
-        conf = det.conf[0].item()
-        cls = int(det.cls[0].item())
+    for det in results.pred[0]:  # Updated access to predictions in YOLOv12
+        xyxy = det[:4].cpu().numpy().astype(int)  # Get bounding box coordinates
+        conf = det[4].item()  # Get confidence score
+        cls = int(det[5].item())  # Get the class ID
 
         if conf > (CONF_THRESHOLD - HYSTERESIS):
             seen_classes.add(cls)
@@ -92,7 +92,7 @@ while True:
     cv2.putText(frame, f'FPS: {fps:.2f}', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
     # Display results
-    cv2.imshow('YOLOv11 Detection', frame)
+    cv2.imshow('YOLOv12 Detection', frame)
 
     # Quit on 'q'
     if cv2.waitKey(1) & 0xFF == ord('q'):
