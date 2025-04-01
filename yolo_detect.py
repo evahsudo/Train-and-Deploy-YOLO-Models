@@ -1,103 +1,48 @@
 import cv2
 import numpy as np
 from ultralytics import YOLO
-from collections import defaultdict
 
-# Store smoothing state for each object
-class BoxSmoother:
-    def __init__(self, alpha=0.2):
-        self.alpha = alpha
-        self.prev_box = None
-        self.prev_conf = None
-        self.frames_since_seen = 0
+# Initialize the YOLOv12 model
+model = YOLO('my_model.pt')  # Path to your YOLOv12 model
 
-    def smooth(self, box, conf):
-        if self.prev_box is None:
-            self.prev_box = box
-            self.prev_conf = conf
-        else:
-            # Exponential moving average for box coordinates
-            self.prev_box = [
-                int(self.alpha * box[i] + (1 - self.alpha) * self.prev_box[i])
-                for i in range(4)
-            ]
-            # Smooth confidence
-            self.prev_conf = self.alpha * conf + (1 - self.alpha) * self.prev_conf
+# Define the camera source (USB camera)
+cap = cv2.VideoCapture('usb0')
 
-        return self.prev_box, self.prev_conf
-    
-    def update_seen(self):
-        self.frames_since_seen = 0
-
-    def age(self):
-        self.frames_since_seen += 1
-        return self.frames_since_seen
-
-# Initialize YOLO model (No path needed here, assuming model is already loaded correctly)
-model = YOLO("best.pt")  # Replace with your YOLOv12 model if it's already loaded
-
-# Trackers for each class
-trackers = defaultdict(BoxSmoother)
-
-# Minimum confidence threshold (with hysteresis)
-CONF_THRESHOLD = 0.5
-HYSTERESIS = 0.05
-
-# Capture from webcam
-cap = cv2.VideoCapture(0)
+# Set resolution
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
 while True:
     ret, frame = cap.read()
     if not ret:
+        print("Failed to grab frame.")
         break
-    
-    # Run YOLO inference (Updated for YOLOv12)
-    results = model(frame)  # Direct inference using the model
 
-    # Track seen objects
-    seen_classes = set()
+    # Run inference using YOLOv12
+    results = model(frame)  # Direct inference
 
-    for det in results.pred[0]:  # Updated access to predictions in YOLOv12
-        xyxy = det[:4].cpu().numpy().astype(int)  # Get bounding box coordinates
-        conf = det[4].item()  # Get confidence score
-        cls = int(det[5].item())  # Get the class ID
+    # Extract bounding boxes and labels
+    for result in results.pred[0]:  # YOLOv12 prediction format
+        # The format of result in YOLOv12 is different, here we get the box and confidence score
+        xyxy = result[:4].cpu().numpy().astype(int)  # Bounding box coordinates
+        conf = result[4].item()  # Confidence score
+        cls = int(result[5].item())  # Class ID
 
-        if conf > (CONF_THRESHOLD - HYSTERESIS):
-            seen_classes.add(cls)
+        if conf > 0.5:  # Threshold for displaying boxes
+            # Draw bounding box
+            x1, y1, x2, y2 = xyxy
+            label = f'{model.names[cls]} {conf:.2f}'
+            color = (0, 255, 0)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+            cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
-            # Initialize tracker if not already present
-            if cls not in trackers:
-                trackers[cls] = BoxSmoother()
-
-            # Smooth box and confidence
-            x, y, x2, y2 = xyxy
-            smoothed_box, smoothed_conf = trackers[cls].smooth([x, y, x2, y2], conf)
-            trackers[cls].update_seen()
-
-            if smoothed_conf > CONF_THRESHOLD:
-                color = (0, 255, 0)
-                cv2.rectangle(frame, (smoothed_box[0], smoothed_box[1]), (smoothed_box[2], smoothed_box[3]), color, 2)
-                label = f"{model.names[cls]}: {smoothed_conf:.2f}"
-                cv2.putText(frame, label, (smoothed_box[0], smoothed_box[1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
-
-    # Remove old detections (age out unseen objects)
-    for cls in list(trackers.keys()):
-        if cls not in seen_classes:
-            age = trackers[cls].age()
-            if age > 5:  # Remove if not seen for 5 frames
-                del trackers[cls]
-
-    # Show FPS
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    cv2.putText(frame, f'FPS: {fps:.2f}', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-
-    # Display results
+    # Display the frame
     cv2.imshow('YOLOv12 Detection', frame)
 
-    # Quit on 'q'
+    # Quit on 'q' key press
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
-# Cleanup
+# Release resources
 cap.release()
 cv2.destroyAllWindows()
